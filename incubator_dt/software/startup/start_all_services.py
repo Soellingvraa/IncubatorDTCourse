@@ -34,4 +34,4 @@ if __name__ == '__main__':
     # Enable self adaptation
     # start_as_daemon(start_self_adaptation_manager)
     # start_as_daemon(start_supervisor)
-    start_as_daemon(start_energy_saver)
+    #start_as_daemon(start_energy_saver)
