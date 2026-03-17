@@ -1,4 +1,5 @@
 
+
 # Configure python path to load incubator modules
 import sys
 import os
@@ -29,7 +30,7 @@ from incubator.communication.shared.protocol import ROUTING_KEY_STATE, ROUTING_K
 
 class PTReconfigurationService:
 
-    def __init__(self, max_diff, new_temp_desired, rabbitmq_config, anomaly_samples_required=2):
+    def __init__(self, max_diff, new_temp_desired, rabbitmq_config, new_max_temp, new_min_temp, original_max_temp, original_min_temp, anomaly_samples_required=2):
 
         self._rabbitmq = Rabbitmq(**rabbitmq_config)
 
@@ -46,6 +47,12 @@ class PTReconfigurationService:
         self.lt = None
         self._consecutive_anomaly_samples = 0
 
+        self._new_max_temp = new_max_temp
+        self._new_min_temp = new_min_temp
+        self._original_max_temp = original_max_temp
+        self._original_min_temp = original_min_temp
+        self._is_reconfigured = False
+
     def setup(self):
         self._rabbitmq.connect_to_server()
 
@@ -58,7 +65,8 @@ class PTReconfigurationService:
         self._rabbitmq.channel.queue_bind(
             exchange=self._rabbitmq.exchange_name,
             queue=local_queue,
-            routing_key="incubator.record.dtcourse.moving_temperature_average_service.temperature_moving_average"
+            #routing_key="incubator.record.dtcourse.moving_temperature_average_service.temperature_moving_average"
+            routing_key="incubator.record.dtcourse.temperature_prediction_service.average_temperature"
         )
 
         self._l.info(f"PTReconfigurationService setup complete.")
@@ -71,11 +79,17 @@ class PTReconfigurationService:
         nt = body_json["time"]
         self.lt = nt  # Store last timestamp
 
-        if "average_temperature" in body_json["fields"]:
-            self.temp = body_json["fields"]["average_temperature"]
+        # if "average_temperature" in body_json["fields"]:
+        #     self.temp = body_json["fields"]["average_temperature"]
 
-        if "moving_average_temperature" in body_json["fields"]:
-            self.avg = body_json["fields"]["moving_average_temperature"]
+        # if "moving_average_temperature" in body_json["fields"]:
+        #     self.avg = body_json["fields"]["moving_average_temperature"]
+
+        # Must change to (prediction service):
+        if body_json.get("measurement") == "temperature_prediction_service":
+            self.avg = body_json["fields"]["average_temperature"]
+        elif "average_temperature" in body_json["fields"]:
+            self.temp = body_json["fields"]["average_temperature"]
 
         if self.avg is not None and self.temp is not None:
             self.check_if_reconfiguration_needed()
@@ -108,6 +122,15 @@ class PTReconfigurationService:
 
         if diff <= self._max_diff:
             self._consecutive_anomaly_samples = 0
+            if self._is_reconfigured:
+                self._rabbitmq.send_message(ROUTING_KEY_UPDATE_CLOSED_CTRL_PARAMS, {
+                    "max_temp": self._original_max_temp,
+                    "min_temp": self._original_min_temp,
+                })
+                self._is_reconfigured = False
+                self._l.info(
+                    f"Anomaly cleared. Restored controller thresholds to max={self._original_max_temp}, min={self._original_min_temp}."
+                )
             self._l.info(f"No reconfiguration needed. Temp: {self.temp} and Avg: {self.avg}. Difference: {diff}")
             return 
 
@@ -125,10 +148,11 @@ class PTReconfigurationService:
             f"Temp: {self.temp} and Avg: {self.avg}. Difference: {diff}"
         )
 
-        # Publish message reconfiguring the incubator by setting the desired temperature to a small value.
         self._rabbitmq.send_message(ROUTING_KEY_UPDATE_CLOSED_CTRL_PARAMS, {
-            "temperature_desired": self._new_temp_desired,
+            "max_temp": self._new_max_temp,
+            "min_temp": self._new_min_temp,
         })
+        self._is_reconfigured = True
 
         # Reset the counter after issuing a reconfiguration command.
         self._consecutive_anomaly_samples = 0
@@ -156,6 +180,10 @@ if __name__ == "__main__":
         max_diff=1.0,
         new_temp_desired=25.0,
         rabbitmq_config=config["rabbitmq"],
+        new_max_temp=26.0,
+        new_min_temp=24.0,
+        original_max_temp=39.0,
+        original_min_temp=36.0,
         anomaly_samples_required=2,
     )
 

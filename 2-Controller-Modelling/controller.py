@@ -148,7 +148,7 @@ class ControllerService:
     def setup(self):
         self.rabbitmq.connect_to_server()
         self.safe_protocol()
-        self.rabbitmq.subscribe(routing_key="incubator.update.dtcourse.controller.parameters",
+        self.rabbitmq.subscribe(routing_key=ROUTING_KEY_UPDATE_CLOSED_CTRL_PARAMS,
                                 on_message_callback=self.update_parameters)
         self.rabbitmq.subscribe(routing_key=ROUTING_KEY_STATE,
                                 on_message_callback=self.control_loop_callback)
